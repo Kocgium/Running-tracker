@@ -1,12 +1,14 @@
-import os
 from datetime import date
 
+import gspread
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from google.oauth2.service_account import Credentials
 
 
-CSV_FILE = "runs.csv"
+SHEET_NAME = "running_tracker_data"
+WORKSHEET_NAME = "runs"
 
 COLUMNS = [
     "Fecha",
@@ -22,21 +24,52 @@ COLUMNS = [
 ]
 
 
+def get_worksheet():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scope,
+    )
+
+    client = gspread.authorize(credentials)
+    spreadsheet = client.open(SHEET_NAME)
+    worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
+
+    return worksheet
+
+
 def load_data():
-    if os.path.exists(CSV_FILE):
-        return pd.read_csv(CSV_FILE)
-    return pd.DataFrame(columns=COLUMNS)
+    worksheet = get_worksheet()
+    records = worksheet.get_all_records()
+
+    if not records:
+        return pd.DataFrame(columns=COLUMNS)
+
+    df = pd.DataFrame(records)
+
+    for column in COLUMNS:
+        if column not in df.columns:
+            df[column] = ""
+
+    return df[COLUMNS]
+
 
 def save_run(new_run):
-    df = load_data()
-    df = pd.concat([df, pd.DataFrame([new_run])], ignore_index=True)
-    df.to_csv(CSV_FILE, index=False)
+    worksheet = get_worksheet()
+    row = [new_run[column] for column in COLUMNS]
+    worksheet.append_row(row, value_input_option="USER_ENTERED")
+
 
 def delete_last_run():
-    df = load_data()
-    if not df.empty:
-        df = df.iloc[:-1]
-        df.to_csv(CSV_FILE, index=False)
+    worksheet = get_worksheet()
+    all_values = worksheet.get_all_values()
+
+    if len(all_values) > 1:
+        worksheet.delete_rows(len(all_values))
 
 def time_to_seconds(time_text):
     try:
